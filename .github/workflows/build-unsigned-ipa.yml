@@ -44,17 +44,16 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout automation repo
         uses: actions/checkout@v4
 
       - name: Select Xcode version
-        if: ${{ github.event.inputs.xcode_version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: ${{ github.event.inputs.xcode_version }}
+          xcode-version: ${{ github.event.inputs.xcode_version || 'latest-stable' }}
 
       - name: Show selected Xcode
         run: xcodebuild -version
