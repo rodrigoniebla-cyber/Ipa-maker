@@ -1,0 +1,131 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'Git URL of the Xcode project repo to clone (leave empty to build from a .zip pushed to uploads/)'
+        required: false
+        default: ''
+      ref:
+        description: 'Branch, tag, or commit SHA to check out (defaults to the repo default branch)'
+        required: false
+        default: ''
+      zip_path:
+        description: 'Path under uploads/ to a .zip of the Xcode project (used when repo_url is empty)'
+        required: false
+        default: ''
+      project_subpath:
+        description: 'Subdirectory inside the source where the .xcodeproj/.xcworkspace lives (leave empty if at the root)'
+        required: false
+        default: ''
+      scheme:
+        description: 'Xcode scheme to build (leave empty to auto-detect)'
+        required: false
+        default: ''
+      configuration:
+        description: 'Build configuration'
+        required: false
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+      xcode_version:
+        description: 'Xcode version to select, e.g. 15.4 (leave empty for runner default)'
+        required: false
+        default: ''
+  push:
+    paths:
+      - 'uploads/**.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout automation repo
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        if: ${{ github.event.inputs.xcode_version != '' }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ github.event.inputs.xcode_version }}
+
+      - name: Show selected Xcode
+        run: xcodebuild -version
+
+      - name: Prepare source from Git repo
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.repo_url != '' }}
+        env:
+          REPO_URL: ${{ github.event.inputs.repo_url }}
+          REF: ${{ github.event.inputs.ref }}
+          SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          CLONE_URL="$REPO_URL"
+          if [[ -n "${SOURCE_REPO_TOKEN}" && "$REPO_URL" == https://* ]]; then
+            CLONE_URL="$(echo "$REPO_URL" | sed -E "s#https://#https://x-access-token:${SOURCE_REPO_TOKEN}@#")"
+          fi
+          git clone --recurse-submodules "$CLONE_URL" source
+          if [[ -n "$REF" ]]; then
+            git -C source fetch --depth 1 origin "$REF" || git -C source fetch origin
+            git -C source checkout "$REF"
+            git -C source submodule update --init --recursive
+          fi
+
+      - name: Determine uploaded zip path
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.repo_url == '' }}
+        id: zip
+        env:
+          ZIP_INPUT: ${{ github.event.inputs.zip_path }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ZIP_INPUT:-}" ]]; then
+            ZIP_FILE="uploads/${ZIP_INPUT#uploads/}"
+          else
+            ZIP_FILE="$(ls -t uploads/*.zip 2>/dev/null | head -n1 || true)"
+          fi
+          if [[ -z "$ZIP_FILE" || ! -f "$ZIP_FILE" ]]; then
+            echo "::error::No project zip found. Push a .zip to uploads/ or set repo_url/zip_path in the workflow inputs."
+            exit 1
+          fi
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare source from uploaded zip
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.repo_url == '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          unzip -q "${{ steps.zip.outputs.zip_file }}" -d source
+
+      - name: Build unsigned IPA
+        id: build
+        env:
+          SOURCE_DIR: ${{ github.workspace }}/source
+          OUTPUT_DIR: ${{ github.workspace }}/output
+          PROJECT_SUBPATH: ${{ github.event.inputs.project_subpath }}
+          SCHEME: ${{ github.event.inputs.scheme }}
+          CONFIGURATION: ${{ github.event.inputs.configuration || 'Release' }}
+        run: ./scripts/build_unsigned_ipa.sh
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.ipa_name || 'unsigned-ipa' }}
+          path: ${{ steps.build.outputs.ipa_path }}
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            output/App.xcarchive
+          if-no-files-found: ignore
