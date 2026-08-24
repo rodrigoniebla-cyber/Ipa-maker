@@ -38,8 +38,17 @@ URL automatically when set.
 
 ## Getting the IPA
 
-Once the run finishes, open it in the **Actions** tab and download the
-`.ipa` from the **Artifacts** section at the bottom of the run summary.
+Every successful run commits the built `.ipa` into this repo under
+`builds/` (overwriting the previous one). This is the easiest way to get it
+on an iPhone/iPad: open `builds/<AppName>.ipa` on GitHub, tap **⋯ → Download
+raw file** (or the download icon). That downloads the plain `.ipa` file
+directly — no zip involved, so there's nothing to unzip.
+
+Alternatively, the run's **Actions** tab still has the `.ipa` under
+**Artifacts** at the bottom of the run summary — but GitHub always wraps
+artifact downloads in an extra `.zip`, which some on-device unzip tools
+(including iPadOS Files) can choke on. Prefer the `builds/` file if that
+happens to you.
 
 ## What the build does
 
