@@ -49,6 +49,8 @@ jobs:
     steps:
       - name: Checkout automation repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1
@@ -88,12 +90,25 @@ jobs:
           if [[ -n "${ZIP_INPUT:-}" ]]; then
             ZIP_FILE="uploads/${ZIP_INPUT#uploads/}"
           else
-            ZIP_FILE="$(ls -t uploads/*.zip 2>/dev/null | head -n1 || true)"
+            # Pick the zip with the most recent commit touching it -- file
+            # mtimes are useless here since actions/checkout stamps every
+            # file with the same checkout-time mtime, not its upload time.
+            ZIP_FILE=""
+            LATEST_TS=-1
+            shopt -s nullglob
+            for f in uploads/*.zip; do
+              ts="$(git log -1 --format=%ct -- "$f")"
+              if [[ -n "$ts" && "$ts" -gt "$LATEST_TS" ]]; then
+                LATEST_TS="$ts"
+                ZIP_FILE="$f"
+              fi
+            done
           fi
           if [[ -z "$ZIP_FILE" || ! -f "$ZIP_FILE" ]]; then
             echo "::error::No project zip found. Push a .zip to uploads/ or set repo_url/zip_path in the workflow inputs."
             exit 1
           fi
+          echo "Selected $ZIP_FILE"
           echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Prepare source from uploaded zip
