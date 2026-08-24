@@ -40,7 +40,7 @@ on:
       - 'uploads/**.zip'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -119,6 +119,21 @@ jobs:
           name: ${{ steps.build.outputs.ipa_name || 'unsigned-ipa' }}
           path: ${{ steps.build.outputs.ipa_path }}
           if-no-files-found: error
+
+      - name: Commit unsigned IPA into the repo
+        run: |
+          set -euo pipefail
+          mkdir -p builds
+          cp "${{ steps.build.outputs.ipa_path }}" "builds/${{ steps.build.outputs.ipa_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "builds/${{ steps.build.outputs.ipa_name }}"
+          if ! git diff --cached --quiet; then
+            git commit -m "Update built unsigned IPA: ${{ steps.build.outputs.ipa_name }}"
+            git push
+          else
+            echo "IPA unchanged, nothing to commit."
+          fi
 
       - name: Upload build logs on failure
         if: failure()
